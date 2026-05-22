@@ -12,9 +12,11 @@ jobs:
         with:
           submodules: recursive
 
-      # ==============================
-      # 缓存 ESP-IDF （一次下载，永久使用）
-      # ==============================
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-setuptools python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+
       - name: Cache ESP-IDF
         uses: actions/cache@v4
         id: esp-idf-cache
@@ -22,8 +24,7 @@ jobs:
           path: esp-idf
           key: esp-idf-v5.1.4
 
-      # 只有缓存不存在时，才会下载
-      - name: Install ESP-IDF (only if cache not found)
+      - name: Install ESP-IDF
         if: steps.esp-idf-cache.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/espressif/esp-idf.git
@@ -32,18 +33,14 @@ jobs:
           git submodule update --init --recursive
           ./install.sh
 
-      # 无论有没有缓存，都必须执行这一步
       - name: Load ESP-IDF environment
         run: |
           cd esp-idf
           source export.sh
 
-      # ==============================
-      # 编译固件（官方原版 + 你的引脚）
-      # ==============================
       - name: Build ESP32-S3 firmware
         run: |
-          python make.py \
+          python make.py esp32 \
             BOARD=ESP32_GENERIC_S3_OCTAL_PSRAM \
             LVGL_ENABLE=1 \
             MICROPY_PY_USSL=1 \
