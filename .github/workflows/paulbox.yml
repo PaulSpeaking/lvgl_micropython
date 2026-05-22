@@ -1,57 +1,69 @@
-name: Build ESP32‑S3‑N16R8 LVGL IoT Firmware
+name: Build LVGL MicroPython firmware (Cached ESP-IDF)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-firmware:
     runs-on: ubuntu-22.04
-
     steps:
-      # 1. 拉取当前仓库
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
-      # 2. 安装系统依赖（作者原版）
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y git wget flex bison gperf python3 python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+      # ==============================
+      # 缓存 ESP-IDF （一次下载，永久使用）
+      # ==============================
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        id: esp-idf-cache
+        with:
+          path: esp-idf
+          key: esp-idf-v5.1.4
 
-      # 3. 安装 ESP‑IDF v5.1.4
-      - name: Install ESP‑IDF
+      # 只有缓存不存在时，才会下载
+      - name: Install ESP-IDF (only if cache not found)
+        if: steps.esp-idf-cache.outputs.cache-hit != 'true'
         run: |
-          git clone -b v5.1.4 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
-          cd ~/esp-idf
-          ./install.sh all
+          git clone https://github.com/espressif/esp-idf.git
+          cd esp-idf
+          git checkout v5.1.4
+          git submodule update --init --recursive
+          ./install.sh
 
-      # 4. 编译（适配该仓库 ext_mod 结构，引脚/功能完全不变）
-      - name: Build Firmware
+      # 无论有没有缓存，都必须执行这一步
+      - name: Load ESP-IDF environment
         run: |
-          source ~/esp-idf/export.sh
-          python3 make.py \
+          cd esp-idf
+          source export.sh
+
+      # ==============================
+      # 编译固件（官方原版 + 你的引脚）
+      # ==============================
+      - name: Build ESP32-S3 firmware
+        run: |
+          python make.py \
             BOARD=ESP32_GENERIC_S3_OCTAL_PSRAM \
-            CFLAGS="-DMICROPY_PY_BLUETOOTH=1 \
-                    -DMICROPY_PY_NETWORK=1 \
-                    -DMICROPY_PY_NETWORK_ESPNOW=1 \
-                    -DMICROPY_PY_MQTT=1 \
-                    -DLVGL_DISPLAY_SPI_DC_PIN=46 \
-                    -DLVGL_DISPLAY_SPI_CS_PIN=10 \
-                    -DLVGL_DISPLAY_SPI_CLK_PIN=12 \
-                    -DLVGL_DISPLAY_SPI_MOSI_PIN=11 \
-                    -DLVGL_DISPLAY_SPI_MISO_PIN=13 \
-                    -DLVGL_DISPLAY_RST_PIN=0 \
-                    -DLVGL_DISPLAY_BL_PIN=45 \
-                    -DLVGL_TOUCH_I2C_SCL_PIN=15 \
-                    -DLVGL_TOUCH_I2C_SDA_PIN=16 \
-                    -DLVGL_TOUCH_RST_PIN=18 \
-                    -DLVGL_TOUCH_INT_PIN=17"
+            LVGL_ENABLE=1 \
+            MICROPY_PY_USSL=1 \
+            MICROPY_SSL_MBEDTLS=1 \
+            MICROPY_PY_BLUETOOTH=1 \
+            MICROPY_PY_NETWORK=1 \
+            LVGL_DISPLAY_SPI_DC_PIN=46 \
+            LVGL_DISPLAY_SPI_CS_PIN=10 \
+            LVGL_DISPLAY_SPI_CLK_PIN=12 \
+            LVGL_DISPLAY_SPI_MOSI_PIN=11 \
+            LVGL_DISPLAY_SPI_MISO_PIN=13 \
+            LVGL_DISPLAY_RST_PIN=0 \
+            LVGL_DISPLAY_BL_PIN=45 \
+            LVGL_TOUCH_I2C_SDA_PIN=16 \
+            LVGL_TOUCH_I2C_SCL_PIN=15 \
+            LVGL_TOUCH_RST_PIN=18 \
+            LVGL_TOUCH_INT_PIN=17
 
-      # 5. 上传固件
-      - name: Upload Firmware
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-esp32s3-full
+          name: firmware-esp32s3-lvgl
           path: build/firmware.bin
