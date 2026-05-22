@@ -32,6 +32,8 @@ jobs:
       # 4. 编译固件（沿用你正确的引脚+物联网功能）
       - name: Build Firmware
         run: |
+          # 先进入项目根目录，再初始化IDF，再编译
+          cd pysn2012/lvgl_micropython
           source ~/esp-idf/export.sh
           cd ports/esp32
           make -j4 BOARD=ESP32_GENERIC_S3_OCTAL_PSRAM \
