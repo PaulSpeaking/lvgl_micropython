@@ -1,0 +1,48 @@
+name: Build ESP32-S3 Custom Firmware (LVGL + WiFi + BT + ESPNOW + MQTT)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout lvgl_micropython
+        uses: actions/checkout@v4
+        with:
+          repository: pysn2012/lvgl_micropython
+          ref: main
+          submodules: true
+
+      - name: Setup ESP-IDF
+        uses: espressif/github-actions/setup-esp-idf@master
+        with:
+          idf-version: "v5.1.4"
+
+      - name: Build Firmware
+        run: |
+          cd ports/esp32
+          make -j4 BOARD=ESP32_GENERIC_S3_OCTAL_PSRAM \
+            USER_C_MODULES=../../lib/lv_micropython-drivers/lv_drivers.cmake \
+            CFLAGS="-DMICROPY_PY_BLUETOOTH=1 \
+                    -DMICROPY_PY_NETWORK=1 \
+                    -DMICROPY_PY_NETWORK_ESPNOW=1 \
+                    -DMICROPY_PY_MQTT=1 \
+                    -DLVGL_DISPLAY_SPI_DC_PIN=46 \
+                    -DLVGL_DISPLAY_SPI_CS_PIN=10 \
+                    -DLVGL_DISPLAY_SPI_CLK_PIN=12 \
+                    -DLVGL_DISPLAY_SPI_MOSI_PIN=11 \
+                    -DLVGL_DISPLAY_SPI_MISO_PIN=13 \
+                    -DLVGL_DISPLAY_RST_PIN=0 \
+                    -DLVGL_DISPLAY_BL_PIN=45 \
+                    -DLVGL_TOUCH_I2C_SCL_PIN=15 \
+                    -DLVGL_TOUCH_I2C_SDA_PIN=16 \
+                    -DLVGL_TOUCH_RST_PIN=18 \
+                    -DLVGL_TOUCH_INT_PIN=17"
+
+      - name: Upload Firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp32s3-lvgl-full
+          path: ports/esp32/build-ESP32_GENERIC_S3_OCTAL_PSRAM/firmware.bin
