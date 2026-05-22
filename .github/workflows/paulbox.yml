@@ -1,4 +1,4 @@
-name: Build ESP32-S3 Custom Firmware (LVGL + WiFi + BT + ESPNOW + MQTT)
+name: Build ESP32‑S3‑N16R8 LVGL IoT Firmware
 
 on:
   workflow_dispatch:
@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      # 1. 拉取仓库（作者原版）
       - name: Checkout lvgl_micropython
         uses: actions/checkout@v4
         with:
@@ -15,13 +16,23 @@ jobs:
           ref: main
           submodules: true
 
-      - name: Setup ESP-IDF
-        uses: espressif/github-actions/setup-esp-idf@master
-        with:
-          idf-version: "v5.1.4"
+      # 2. 安装系统依赖（完全照搬作者脚本）
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git wget flex bison gperf python3 python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
+      # 3. 手动安装 ESP‑IDF v5.1.4（作者原版方式，彻底解决action找不到）
+      - name: Install ESP‑IDF
+        run: |
+          git clone -b v5.1.4 --recursive https://github.com/espressif/esp-idf.git ~/esp-idf
+          cd ~/esp-idf
+          ./install.sh all
+
+      # 4. 编译固件（沿用你正确的引脚+物联网功能）
       - name: Build Firmware
         run: |
+          source ~/esp-idf/export.sh
           cd ports/esp32
           make -j4 BOARD=ESP32_GENERIC_S3_OCTAL_PSRAM \
             USER_C_MODULES=../../lib/lv_micropython-drivers/lv_drivers.cmake \
@@ -41,8 +52,9 @@ jobs:
                     -DLVGL_TOUCH_RST_PIN=18 \
                     -DLVGL_TOUCH_INT_PIN=17"
 
+      # 5. 上传固件
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-esp32s3-lvgl-full
+          name: firmware-esp32s3-full
           path: ports/esp32/build-ESP32_GENERIC_S3_OCTAL_PSRAM/firmware.bin
