@@ -12,6 +12,11 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-setuptools python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
+
       - name: Cache ESP-IDF
         uses: actions/cache@v4
         id: cache-esp-idf
@@ -19,7 +24,7 @@ jobs:
           path: esp-idf
           key: esp-idf-v5.1.4
 
-      - name: Install ESP-IDF (if no cache)
+      - name: Install ESP-IDF
         if: steps.cache-esp-idf.outputs.cache-hit != 'true'
         run: |
           git clone https://github.com/espressif/esp-idf.git
@@ -28,28 +33,11 @@ jobs:
           git submodule update --init --recursive
           ./install.sh
 
-      - name: Cache build ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-setuptools python3-serial python3-click python3-cryptography python3-future python3-pyparsing python3-pyelftools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
-
-      - name: Load ESP-IDF environment
+      - name: Build ESP32-S3 firmware
         run: |
           cd esp-idf
           source export.sh
           cd ..
-
-      # ✅ 正确写法：board + variant + flash_size
-      - name: Build ESP32-S3 firmware
-        run: |
           python make.py esp32 \
             board=ESP32_GENERIC_S3 \
             variant=SPIRAM_OCT \
@@ -71,6 +59,9 @@ jobs:
             LVGL_TOUCH_RST_PIN=18 \
             LVGL_TOUCH_INT_PIN=17
 
+      # ==============================================
+      # 这里 100% 原封不动抄作者官方路径！
+      # ==============================================
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
