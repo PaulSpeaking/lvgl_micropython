@@ -1,0 +1,139 @@
+# ==============================================================
+#  GitHub Action 自动化编译
+#  完全对照：飞书零基础 LVGL_MicroPython 编译教程
+#  硬件：ESP32-S3 N16R8 (16MB + OCT PSRAM) + ILI9341 + FT6336
+#  功能：LVGL + WiFi + ESPNow + MQTT + 蓝牙 + SSL + 文件系统
+# ==============================================================
+name: 【Freak飞书教程对照版】ESP32-S3 LVGL_MicroPython 自动编译
+
+# 触发方式：仅手动点击运行
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # 虚拟机环境：Ubuntu最新版（和教程Linux环境一致）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: ESP32_GENERIC_S3
+            variant: SPIRAM_OCT       # 八线PSRAM（N16R8专用）
+            flash_size: 16            # 16MB Flash
+            display: ili9341          # 你的屏幕
+            indev: ft6x36             # 你的触摸
+
+    steps:
+      # ==========================================
+      # 【教程步骤 1：拉取代码 + 子模块】
+      # ==========================================
+      - name: 步骤1 → 拉取源码（含lvgl/micropython/esp-idf）
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # ==========================================
+      # 【教程步骤 2：安装Ubuntu依赖】
+      # ==========================================
+      - name: 步骤2 → 安装Linux编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+          build-essential \
+          pkg-config \
+          cmake \
+          ninja-build \
+          git \
+          wget \
+          libncurses-dev \
+          flex \
+          bison
+
+      # ==========================================
+      # 【教程步骤 3：配置Python环境】
+      # ==========================================
+      - name: 步骤3 → 安装Python3.11（官方指定版本）
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ==========================================
+      # 【教程步骤 4：初始化子模块】
+      # ==========================================
+      - name: 步骤4 → 初始化MicroPython/LVGL子模块
+        run: |
+          git submodule update --init --depth 1 -- lib/pycparser
+          git submodule update --init --depth 1 --jobs 4 -- lib/micropython
+          git submodule update --init --depth 1 --jobs 4 -- lib/lvgl
+
+      # ==========================================
+      # 【教程步骤 5：安装ESP-IDF环境】
+      # ==========================================
+      - name: 步骤5 → 下载并安装ESP-IDF工具链
+        run: |
+          git submodule update --init --depth 1 --jobs 4 -- lib/esp-idf
+          cd lib/esp-idf
+          ./install.sh esp32s3
+          cd ../..
+
+      # ==========================================
+      # 【教程步骤 6：激活IDF环境】
+      # ==========================================
+      - name: 步骤6 → 激活ESP-IDF编译环境
+        run: |
+          export IDF_PATH=$GITHUB_WORKSPACE/lib/esp-idf
+          . ./lib/esp-idf/export.sh
+
+      # ==========================================
+      # 【教程步骤 7：执行编译命令】
+      # ==========================================
+      - name: 步骤7 → 开始编译固件（物联网功能全开）
+        run: |
+          opts=()
+          
+          # ========= 基础硬件配置 =========
+          [[ -n "${{ matrix.variant }}" ]] && opts+=("BOARD_VARIANT=${{ matrix.variant }}")
+          opts+=("BOARD=${{ matrix.board }}")
+          opts+=("--flash-size=${{ matrix.flash_size }}")
+          opts+=("DISPLAY=${{ matrix.display }}")
+          [[ -n "${{ matrix.indev }}" ]] && opts+=("INDEV=${{ matrix.indev }}")
+
+          # ========= 核心功能 =========
+          opts+=("LVGL_ENABLE=1")                # 开启LVGL图形库
+          
+          # ========= 物联网必备功能全开 =========
+          opts+=("MICROPY_PY_WIFI=1")            # WiFi功能
+          opts+=("MICROPY_PY_ESPNOW=1")          # ESPNow无线通信
+          opts+=("MICROPY_PY_MQTT=1")            # MQTT物联网协议
+          opts+=("MICROPY_PY_BLUETOOTH=1")       # 蓝牙功能
+          opts+=("MICROPY_PY_NETWORK=1")         # 通用网络
+          
+          # ========= 安全通信 =========
+          opts+=("MICROPY_PY_USSL=1")            # SSL/TLS加密
+          opts+=("MICROPY_SSL_MBEDTLS=1")        # 底层加密库
+
+          # ========= 执行编译（和教程命令完全一致） =========
+          python3 make.py esp32 "${opts[@]}"
+
+      # ==========================================
+      # 【教程步骤 8：提取固件】
+      # ==========================================
+      - name: 步骤8 → 整理编译好的.bin固件
+        run: |
+          mkdir -p "$HOME/artifacts"
+          BUILD_DIR="${{ github.workspace }}/lib/micropython/ports/esp32"
+          BOARD_NAME="${{ matrix.board }}"
+          [[ -n "${{ matrix.variant }}" ]] && BOARD_NAME+="-${{ matrix.variant}}"
+          cp "${BUILD_DIR}/build-${BOARD_NAME}/firmware.bin" \
+          "$HOME/artifacts/ESP32S3_N16R8_LVGL_MQTT_ESPNow.bin"
+
+      # ==========================================
+      # 上传固件供下载
+      # ==========================================
+      - name: 步骤9 → 上传固件（编译完在这里下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: 正式版固件_ESP32S3_LVGL_MQTT_ESPNow
+          path: ~/artifacts/*.bin
