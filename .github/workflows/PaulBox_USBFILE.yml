@@ -1,162 +1,114 @@
-# 定义工作流名称
-name: Build ESP32-S3 LVGL USB MicroPython
+name: Build lvgl_mpy
 
-# 触发条件：仅手动触发
 on:
-  workflow_dispatch:  # 仅手动触发
+  workflow_dispatch:
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
 
 jobs:
-  build_esp32:
+  build-esp32:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:  # 只保留你自己的配置：ESP32-S3 N16R8 + ILI9341 + FT6336
+      matrix:
         include:
+          # 👇 只改这里！完全匹配你的 ESP32-S3 N16R8 + 屏幕 + 触摸
           - board: ESP32_GENERIC_S3
-            variant: SPIRAM_OCT       # 八线PSRAM (N16R8专用)
-            flash_size: 16            # 16MB Flash
-            display: ili9341          # 你的屏幕驱动
-            indev: ft6x36             # 你的触摸驱动
+            variant: SPIRAM_OCT
+            flash_size: 16
+            display: ili9341
+            indev: ft6x36
 
     steps:
-    # 1. 检出源码：拉取项目 + 所有子模块(必须)
-    - name: 1. 检出 lvgl_micropython 主仓库（含全部子模块）
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive      # 递归拉取所有子模块
-        fetch-depth: 0            # 拉取完整历史
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
-    # 2. 安装系统依赖：编译必需的基础工具
-    - name: 2. 安装 Ubuntu 系统级编译依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-        build-essential \
-        pkg-config \
-        cmake \
-        ninja-build \
-        ccache
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            cmake \
+            ninja-build \
+            ccache
 
-    # 3. 配置Python：官方指定3.11，最稳定
-    - name: 3. 配置 Python 3.11 运行环境
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    # 4. 初始化关键子模块：加速下载，只拉必需部分
-    - name: 4. 浅克隆关键子模块（加速）
-      run: |
-        git submodule update --init --depth 1 -- lib/pycparser
-        git submodule update --init --depth 1 --jobs 4 -- lib/micropython
-        git submodule update --init --depth 1 --jobs 4 -- lib/lvgl
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --depth 1 -- lib/pycparser
+          git submodule update --init --depth 1 --jobs 4 -- lib/micropython
+          git submodule update --init --depth 1 --jobs 4 -- lib/lvgl
 
-    # 5. 缓存 ESP-IDF：第一次下载，后续复用(速度快)
-    - name: 5. 加载或创建 ESP-IDF 缓存
-      id: cache-deps
-      uses: actions/cache@v4
-      with:
-        path: |
-          lib/esp-idf        # ESP-IDF 核心目录
-          ~/.espressif       # 工具链缓存
-        key: ${{ runner.os }}-v4-deps
+      - name: Cache ESP-IDF
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            lib/esp-idf
+            ~/.espressif
+          key: ${{ runner.os }}-v4-deps
 
-    # 6. 缓存不存在时，才安装 ESP-IDF
-    - name: 6. 缓存未命中时拉取 ESP-IDF
-      if: steps.cache-deps.outputs.cache-hit != 'true'
-      run: |
-        git submodule update --init --depth 1 --jobs 4 -- lib/esp-idf
-        cd lib/esp-idf
-        git submodule update --init --depth 1 --jobs 4 -- \
-          components/bt/host/nimble/nimble \
-          components/esp_wifi \
-          components/esptool_py/esptool \
-          components/lwip/lwip \
-          components/mbedtls/mbedtls
-        cd ../..
-        export "IDF_PATH=$GITHUB_WORKSPACE/lib/esp-idf"
-        ./lib/esp-idf/install.sh all
+      - name: Prepare ESP-IDF
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init --depth 1 --jobs 4 -- lib/esp-idf
+          cd lib/esp-idf
+          git submodule update --init --depth 1 --jobs 4 -- \
+            components/bt/host/nimble/nimble \
+            components/esp_wifi \
+            components/esptool_py/esptool \
+            components/lwip/lwip \
+            components/mbedtls/mbedtls
+          cd ../..
+          export IDF_PATH=$GITHUB_WORKSPACE/lib/esp-idf
+          ./lib/esp-idf/install.sh all
 
-    # 7. 激活 ESP-IDF 环境：必须执行，否则无法编译
-    - name: 7. 激活 ESP-IDF 环境变量
-      run: |
-        export "IDF_PATH=$GITHUB_WORKSPACE/lib/esp-idf"
-        . ./lib/esp-idf/export.sh
-      env:
-        IDF_PATH: ${{ github.workspace }}/lib/esp-idf
+      - name: Export ESP-IDF
+        run: |
+          export IDF_PATH=$GITHUB_WORKSPACE/lib/esp-idf
+          . ./lib/esp-idf/export.sh
+        env:
+          IDF_PATH: ${{ github.workspace }}/lib/esp-idf
 
-    # 8. 核心编译：官方模板 + 你的全部硬件引脚 + 功能全开
-    - name: 8. 编译固件（你的引脚 + WiFi + 蓝牙 + LVGL + USB_OTG修复）
-      run: |
-        opts=()
-        [[ -n "${{ matrix.variant }}" ]] && opts+=("BOARD_VARIANT=${{ matrix.variant }}")
-        opts+=("BOARD=${{ matrix.board }}")
-        opts+=("--flash-size=${{ matrix.flash_size }}")
-        opts+=("DISPLAY=${{ matrix.display }}")
-        [[ -n "${{ matrix.indev }}" ]] && opts+=("INDEV=${{ matrix.indev }}")
-        
-        # ========== 你的功能开关（全部不变）==========
-        opts+=("LVGL_ENABLE=1")
-        opts+=("MICROPY_PY_USSL=1")
-        opts+=("MICROPY_SSL_MBEDTLS=1")
-        opts+=("MICROPY_PY_BLUETOOTH=1")
-        opts+=("MICROPY_PY_NETWORK=1")
-        
-        # ==================== USB 上层开关（之前已加） ====================
-        # 启用USB硬件总开关
-        opts+=("MICROPY_HW_ENABLE_USB=1")
-        # 启用USB虚拟串口CDC（对应COM18）
-        opts+=("MICROPY_HW_ENABLE_USB_CDC=1")
-        # 启用USB文件系统MSC（PyCharm/Thonny可见文件）
-        opts+=("MICROPY_HW_ENABLE_USB_MSC=1")
+      - name: Build
+        run: |
+          opts=()
+          [[ -n "${{ matrix.variant }}" ]] && opts+=("BOARD_VARIANT=${{ matrix.variant }}")
+          opts+=("BOARD=${{ matrix.board }}")
+          opts+=("--flash-size=${{ matrix.flash_size }}")
+          opts+=("DISPLAY=${{ matrix.display }}")
+          [[ -n "${{ matrix.indev }}" ]] && opts+=("INDEV=${{ matrix.indev }}")
+          opts+=("LVGL_ENABLE=1")
+          opts+=("MICROPY_PY_USSL=1")
+          opts+=("MICROPY_SSL_MBEDTLS=1")
+          opts+=("MICROPY_PY_BLUETOOTH=1")
+          opts+=("MICROPY_PY_NETWORK=1")
+          python3 make.py esp32 "${opts[@]}"
 
-        # ==================== 关键底层ESP-IDF开关（你之前缺！） ====================
-        # 启用USB OTG底层支持（离开COM17的核心）
-        opts+=("CONFIG_USB_OTG_SUPPORTED=y")
-        # 启用DWC2 USB控制器
-        opts+=("CONFIG_USB_DWC2=y")
-        # 启用CDC-ACM虚拟串口
-        opts+=("CONFIG_USB_CDC_ACM=y")
-        # 把系统控制台绑定到USB CDC（REPL出现在COM18）
-        opts+=("CONFIG_ESP_CONSOLE_USB_CDC=y")
+      - name: Collect binaries
+        run: |
+          ARTIFACTS_DIR="$HOME/artifacts"
+          mkdir -p "$ARTIFACTS_DIR"
+          BUILD_DIR="${{ github.workspace }}/lib/micropython/ports/esp32"
+          BOARD_NAME="${{ matrix.board }}"
+          [[ -n "${{ matrix.variant }}" ]] && BOARD_NAME+="-${{ matrix.variant}}"
+          FW_PATH="${BUILD_DIR}/build-${BOARD_NAME}/firmware.bin"
+          OUT_NAME="lvgl_mpy_${{ matrix.board }}_${{ matrix.variant }}_${{ matrix.flash_size }}MB_${{ matrix.display }}_${{ matrix.indev }}.bin"
+          cp "$FW_PATH" "$ARTIFACTS_DIR/$OUT_NAME"
 
-        # ========== 屏幕SPI主机选择（修复屏幕）==========
-        opts+=("LVGL_DISPLAY_SPI_HOST=SPI2_HOST")
-        
-        # ========== 你的屏幕引脚（全部不变）==========
-        opts+=("LVGL_DISPLAY_SPI_DC_PIN=46")
-        opts+=("LVGL_DISPLAY_SPI_CS_PIN=10")
-        opts+=("LVGL_DISPLAY_SPI_CLK_PIN=12")
-        opts+=("LVGL_DISPLAY_SPI_MOSI_PIN=11")
-        opts+=("LVGL_DISPLAY_SPI_MISO_PIN=13")
-        opts+=("LVGL_DISPLAY_RST_PIN=0")
-        opts+=("LVGL_DISPLAY_BL_PIN=45")
-        
-        # ========== 你的触摸引脚（全部不变）==========
-        opts+=("LVGL_TOUCH_I2C_SDA_PIN=16")
-        opts+=("LVGL_TOUCH_I2C_SCL_PIN=15")
-        opts+=("LVGL_TOUCH_RST_PIN=18")
-        opts+=("LVGL_TOUCH_INT_PIN=17")
-        
-        # 开始编译
-        python3 make.py esp32 "${opts[@]}"
-
-    # 9. 自动找固件：官方模板路径，100%正确
-    - name: 9. 整理固件文件
-      run: |
-        ARTIFACTS_DIR="$HOME/artifacts"
-        mkdir -p "$ARTIFACTS_DIR"
-        BUILD_DIR="${{ github.workspace }}/lib/micropython/ports/esp32"
-        BOARD_NAME="${{ matrix.board }}"
-        [[ -n "${{ matrix.variant }}" ]] && BOARD_NAME+="-${{ matrix.variant }}"
-        FW_PATH="${BUILD_DIR}/build-${BOARD_NAME}/firmware.bin"
-        
-        OUT_NAME="lvgl_mpy_${{ matrix.board }}_${{ matrix.variant }}_${{ matrix.flash_size }}MB_ili9341_ft6336.bin"
-        
-        cp "$FW_PATH" "$ARTIFACTS_DIR/$OUT_NAME"
-
-    # 10. 上传固件：运行完直接下载
-    - name: 10. 上传固件
-      uses: actions/upload-artifact@v4
-      with:
-        name: lvgl_mpy_esp32s3_oct_16MB
-        path: ~/artifacts/*.bin
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: lvgl_mpy_${{ matrix.board }}_${{ matrix.variant }}_${{ matrix.flash_size }}MB
+          path: |
+            ~/artifacts/*.bin
