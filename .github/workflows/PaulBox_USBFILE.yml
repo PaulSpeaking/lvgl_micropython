@@ -1,5 +1,5 @@
 # 定义工作流名称
-name: Build ESP32-S3 LVGL-USB
+name: Build ESP32-S3 LVGL USB MicroPython
 
 # 触发条件：仅手动触发
 on:
@@ -85,7 +85,7 @@ jobs:
         IDF_PATH: ${{ github.workspace }}/lib/esp-idf
 
     # 8. 核心编译：官方模板 + 你的全部硬件引脚 + 功能全开
-    - name: 8. 编译固件（你的引脚 + WiFi + 蓝牙 + LVGL）
+    - name: 8. 编译固件（你的引脚 + WiFi + 蓝牙 + LVGL + USB_OTG修复）
       run: |
         opts=()
         [[ -n "${{ matrix.variant }}" ]] && opts+=("BOARD_VARIANT=${{ matrix.variant }}")
@@ -101,15 +101,26 @@ jobs:
         opts+=("MICROPY_PY_BLUETOOTH=1")
         opts+=("MICROPY_PY_NETWORK=1")
         
-        # ==================== 修复区域 START ====================
-        # 【修复 1】必须开启 USB 功能，否则电脑识别不到串口、文件系统
-        opts+=("MICROPY_HW_ENABLE_USB=1")           # 总开关：启用USB硬件
-        opts+=("MICROPY_HW_ENABLE_USB_CDC=1")       # 启用USB虚拟串口(COM口切换关键)
-        opts+=("MICROPY_HW_ENABLE_USB_MSC=1")       # 启用USB文件系统(让PyCharm可识别文件)
+        # ==================== USB 上层开关（之前已加） ====================
+        # 启用USB硬件总开关
+        opts+=("MICROPY_HW_ENABLE_USB=1")
+        # 启用USB虚拟串口CDC（对应COM18）
+        opts+=("MICROPY_HW_ENABLE_USB_CDC=1")
+        # 启用USB文件系统MSC（PyCharm/Thonny可见文件）
+        opts+=("MICROPY_HW_ENABLE_USB_MSC=1")
 
-        # 【修复 2】指定SPI控制器，确保屏幕驱动正常工作
+        # ==================== 关键底层ESP-IDF开关（你之前缺！） ====================
+        # 启用USB OTG底层支持（离开COM17的核心）
+        opts+=("CONFIG_USB_OTG_SUPPORTED=y")
+        # 启用DWC2 USB控制器
+        opts+=("CONFIG_USB_DWC2=y")
+        # 启用CDC-ACM虚拟串口
+        opts+=("CONFIG_USB_CDC_ACM=y")
+        # 把系统控制台绑定到USB CDC（REPL出现在COM18）
+        opts+=("CONFIG_ESP_CONSOLE_USB_CDC=y")
+
+        # ========== 屏幕SPI主机选择（修复屏幕）==========
         opts+=("LVGL_DISPLAY_SPI_HOST=SPI2_HOST")
-        # ==================== 修复区域 END ====================
         
         # ========== 你的屏幕引脚（全部不变）==========
         opts+=("LVGL_DISPLAY_SPI_DC_PIN=46")
