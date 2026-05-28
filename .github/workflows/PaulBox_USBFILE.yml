@@ -1,5 +1,5 @@
 # 定义工作流名称
-name: Build ESP32-S3 LVGL MicroPython (你的专用固件)
+name: Build ESP32-S3 LVGL-USB
 
 # 触发条件：仅手动触发
 on:
