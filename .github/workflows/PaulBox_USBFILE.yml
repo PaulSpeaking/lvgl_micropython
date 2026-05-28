@@ -1,4 +1,4 @@
-name: Build lvgl_mpy
+name: Build lvgl_mpy-Baseon_Origin
 
 on:
   workflow_dispatch:
